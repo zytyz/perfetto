@@ -167,10 +167,15 @@ async function discoverCudaHipTracks(ctx: Trace): Promise<LeafTrack[]> {
   return raws.map((r) => {
     // The top API group is named after the actual API on the slices'
     // graphics context (e.g. "CUDA" for cuda-injection traces, "HIP" for
-    // hip-injection traces). Slices for which the API couldn't be
-    // resolved fall back to a generic "GPU" label. Different APIs within
-    // the same process get separate sibling groups via the path key.
-    const apiName = r.api ?? 'GPU';
+    // hip-injection traces). Slices whose API couldn't be resolved fall
+    // back to a generic "API" label: gpu_context.api is either SQL NULL or
+    // the literal string "UNDEFINED" (e.g. MTIA, which has no GPU API), and
+    // both mean "unknown". Labelling it "API" keeps a distinct level under
+    // the per-process "GPU" group instead of showing "undefined" or
+    // duplicating "GPU". Different APIs within the same process get separate
+    // sibling groups via the path key.
+    const apiName =
+      r.api == null || r.api.toUpperCase() === 'UNDEFINED' ? 'API' : r.api;
     const apiKey = `api_${apiName.toLowerCase()}`;
     const pathParts: PathPart[] = [{name: apiName, sortOrder: 0, key: apiKey}];
     if ((devicesByUpid.get(r.upid)?.size ?? 0) > 1) {
