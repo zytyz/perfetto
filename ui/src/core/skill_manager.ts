@@ -26,23 +26,44 @@ const SKILL_FILE = 'SKILL.md';
 const NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const PATH_SEGMENT_RE = /^[A-Za-z0-9_.-]+$/;
 
-// The index format written by tools/gen_ui_skills.py.
+// The index format written by tools/gen_ui_skills.py: the builtin
+// ai_skills/index.json and the extension-server modules/{id}/skills file.
 export const skillIndexSchema = z.object({
   skills: z.array(
     z.object({
       name: z.string(),
       description: z.string(),
       files: z.array(z.object({path: z.string(), bytes: z.number()})),
+      // Extension servers only: the name of a builtin skill that this skill
+      // takes the place of. Honoured only from the embedder-managed server.
+      replaces: z.string().optional(),
     }),
   ),
 });
 export type SkillIndex = z.infer<typeof skillIndexSchema>;
 
+/** An index as loaded by a source. */
+export interface LoadedSkillIndex extends SkillIndex {
+  /**
+   * The source's namespace (e.g. an extension server's 'com.acme'). Skills of
+   * a namespaced source are listed as '<namespace>/<name>'. Builtin skills
+   * have no namespace and keep their bare name.
+   */
+  readonly namespace?: string;
+}
+
 /** A place skills come from: one index plus a way to fetch each file. */
 export interface SkillSource {
   /** Shown as SkillInfo.source. */
   readonly id: string;
-  loadIndex(): Promise<SkillIndex>;
+  /**
+   * True for the server that the UI build itself configures (the embedder).
+   * Only such a source may replace a builtin skill: the deployer of a UI
+   * build can ship its own build of a skill, a user-added server cannot.
+   */
+  readonly embedderManaged?: boolean;
+  loadIndex(): Promise<LoadedSkillIndex>;
+  /** `skill` is the name in the source's own index, not the listed id. */
   fetchFile(skill: string, path: string): Promise<string>;
 }
 
@@ -106,12 +127,15 @@ function entryProblem(e: SkillIndex['skills'][number]): string | undefined {
 interface Entry {
   readonly info: SkillInfo;
   readonly source: SkillSource;
+  // The skill's name in its source's index (info.name may differ).
+  readonly nameInSource: string;
   readonly paths: ReadonlySet<string>;
+  readonly replacesBuiltin: boolean;
 }
 
 export class SkillManagerImpl implements SkillManager {
   private readonly sources: SkillSource[] = [];
-  private readonly indexes = new Map<SkillSource, Promise<SkillIndex>>();
+  private readonly indexes = new Map<SkillSource, Promise<LoadedSkillIndex>>();
   private readonly fileCache = new Map<string, Promise<string>>();
 
   addSource(source: SkillSource): void {
@@ -130,10 +154,10 @@ export class SkillManagerImpl implements SkillManager {
     if (rel === undefined || !entry.paths.has(rel)) {
       throw new Error(`"${path}" is not a file of skill "${skill}"`);
     }
-    const key = `${skill}\0${rel}`;
+    const key = `${entry.source.id}\0${entry.nameInSource}\0${rel}`;
     let text = this.fileCache.get(key);
     if (text === undefined) {
-      text = entry.source.fetchFile(skill, rel).then((t) => {
+      text = entry.source.fetchFile(entry.nameInSource, rel).then((t) => {
         if (t.length > MAX_SKILL_FILE_BYTES) {
           throw new Error(`${skill}/${rel} is too large`);
         }
@@ -147,7 +171,7 @@ export class SkillManagerImpl implements SkillManager {
   }
 
   // Each source's index is fetched once, on first use.
-  private loadIndex(source: SkillSource): Promise<SkillIndex> {
+  private loadIndex(source: SkillSource): Promise<LoadedSkillIndex> {
     let index = this.indexes.get(source);
     if (index === undefined) {
       index = source.loadIndex().catch((e) => {
@@ -165,21 +189,37 @@ export class SkillManagerImpl implements SkillManager {
     );
     const byName = new Map<string, Entry>();
     this.sources.forEach((source, i) => {
-      for (const e of validEntries(indexes[i]!, source.id)) {
-        if (byName.has(e.name)) {
-          console.warn(`Skills: "${e.name}" from ${source.id} is a duplicate`);
+      const index = indexes[i]!;
+      for (const e of validEntries(index, source.id)) {
+        const id = listedId(source, index, e);
+        if (id === undefined) continue;
+        const replacesBuiltin =
+          index.namespace !== undefined && id === e.replaces;
+        const existing = byName.get(id);
+        // A replacing skill wins over a builtin one, whatever the source
+        // order; otherwise the first source to list a name keeps it.
+        if (
+          existing !== undefined &&
+          (existing.replacesBuiltin || !replacesBuiltin)
+        ) {
+          console.warn(`Skills: "${id}" from ${source.id} is a duplicate`);
           continue;
         }
-        const files: SkillFile[] = e.files.map((f) => ({...f}));
-        byName.set(e.name, {
+        const files: SkillFile[] = e.files.map((f) => ({
+          path: f.path,
+          bytes: f.bytes,
+        }));
+        byName.set(id, {
           info: {
-            name: e.name,
+            name: id,
             description: e.description,
             files,
             source: source.id,
           },
           source,
+          nameInSource: e.name,
           paths: new Set(files.map((f) => f.path)),
+          replacesBuiltin,
         });
       }
     });
@@ -190,6 +230,25 @@ export class SkillManagerImpl implements SkillManager {
     }
     return new Map(limited.map((n) => [n, byName.get(n)!]));
   }
+}
+
+// The id under which a source's skill is listed, or undefined to drop it.
+function listedId(
+  source: SkillSource,
+  index: LoadedSkillIndex,
+  e: SkillIndex['skills'][number],
+): string | undefined {
+  if (index.namespace === undefined) return e.name;
+  if (e.replaces !== undefined) {
+    if (source.embedderManaged === true && NAME_RE.test(e.replaces)) {
+      return e.replaces;
+    }
+    console.warn(
+      `Skills: ignoring "replaces" of "${e.name}" from ${source.id}: ` +
+        'only the embedder-managed server can replace a builtin skill',
+    );
+  }
+  return `${index.namespace}/${e.name}`;
 }
 
 async function fetchOk(url: string): Promise<Response> {

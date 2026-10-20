@@ -18,6 +18,7 @@ import {
   buildFetchRequest,
 } from './extension_server';
 import type {AppImpl} from '../../core/app_impl';
+import {SkillManagerImpl} from '../../core/skill_manager';
 import type {Macro} from '../../core/command_manager';
 import type {SqlPackage} from '../../public/extra_sql_packages';
 import type {ExtensionServer, UserInput} from './types';
@@ -62,6 +63,7 @@ function createMockAppImpl() {
     addProtoDescriptors: vi.fn((p: Promise<ReadonlyArray<string>>) => {
       protoDescriptorsAdded.push(p);
     }),
+    skills: new SkillManagerImpl(),
     getMacrosAdded: () => macrosAdded,
     getSqlPackagesAdded: () => sqlPackagesAdded,
     getProtoDescriptorsAdded: () => protoDescriptorsAdded,
@@ -496,6 +498,116 @@ describe('extension_server', () => {
       // Should return empty array due to validation failure
       const sqlPackages = await mockApp.getSqlPackagesAdded()[0];
       expect(sqlPackages).toEqual([]);
+    });
+  });
+
+  describe('skills', () => {
+    const manifest = {
+      name: 'Acme',
+      namespace: 'com.acme',
+      features: [{name: 'skills'}],
+      modules: [
+        {id: 'default', name: 'Default'},
+        {id: 'gpu', name: 'GPU'},
+      ],
+    };
+    const skillIndex = (name: string, replaces?: string) => ({
+      skills: [
+        {
+          name,
+          description: `The ${name} skill.`,
+          files: [
+            {path: 'SKILL.md', bytes: 20},
+            {path: 'workflows/x.md', bytes: 5},
+          ],
+          ...(replaces === undefined ? {} : {replaces}),
+        },
+      ],
+    });
+
+    function serveSkills(replaces?: string) {
+      const requested: string[] = [];
+      mockFetch.mockImplementation((url: string) => {
+        requested.push(url);
+        if (url.endsWith('/manifest')) return mockJsonResponse(manifest);
+        if (url.endsWith('/modules/default/skills')) {
+          return mockJsonResponse(skillIndex('perfetto', replaces));
+        }
+        if (url.endsWith('/modules/gpu/skills')) {
+          return mockJsonResponse(skillIndex('gpu-extra'));
+        }
+        if (url.includes('/skill_files/')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            text: async () => `text of ${url}`,
+          } as Response);
+        }
+        return mockErrorResponse(404);
+      });
+      return requested;
+    }
+
+    test('lists server skills under the namespace, files on demand', async () => {
+      const requested = serveSkills();
+      const mockApp = createMockAppImpl();
+      initializeServers(mockApp as unknown as AppImpl, [
+        testExtServer({enabledModules: ['default', 'gpu']}),
+      ]);
+
+      const list = await mockApp.skills.list();
+      expect(list.map((s) => s.name)).toEqual([
+        'com.acme/gpu-extra',
+        'com.acme/perfetto',
+      ]);
+      expect(requested.some((u) => u.includes('/skill_files/'))).toBe(false);
+
+      const text = await mockApp.skills.readFile(
+        'com.acme/gpu-extra',
+        '$SKILL_ROOT/workflows/x.md',
+      );
+      expect(text).toBe(
+        'text of https://server.com/modules/gpu/skill_files/gpu-extra/workflows/x.md',
+      );
+    });
+
+    test('a user-added server cannot replace a builtin skill', async () => {
+      serveSkills('perfetto');
+      const mockApp = createMockAppImpl();
+      initializeServers(mockApp as unknown as AppImpl, [testExtServer()]);
+      const list = await mockApp.skills.list();
+      expect(list.map((s) => s.name)).toEqual(['com.acme/perfetto']);
+    });
+
+    test('the embedder-managed server can replace a builtin skill', async () => {
+      serveSkills('perfetto');
+      const mockApp = createMockAppImpl();
+      mockApp.skills.addSource({
+        id: 'builtin',
+        loadIndex: async () => skillIndex('perfetto'),
+        fetchFile: async () => 'builtin text',
+      });
+      initializeServers(mockApp as unknown as AppImpl, [
+        {...testExtServer(), origin: 'embedder_managed'},
+      ]);
+      const list = await mockApp.skills.list();
+      expect(list.map((s) => [s.name, s.source])).toEqual([
+        ['perfetto', 'server.com'],
+      ]);
+      expect(await mockApp.skills.readFile('perfetto', 'SKILL.md')).toBe(
+        'text of https://server.com/modules/default/skill_files/perfetto/SKILL.md',
+      );
+    });
+
+    test('no skills when the feature is not declared', async () => {
+      mockFetch.mockImplementation((url: string) =>
+        url.endsWith('/manifest')
+          ? mockJsonResponse({...manifest, features: []})
+          : mockErrorResponse(404),
+      );
+      const mockApp = createMockAppImpl();
+      initializeServers(mockApp as unknown as AppImpl, [testExtServer()]);
+      expect(await mockApp.skills.list()).toEqual([]);
     });
   });
 

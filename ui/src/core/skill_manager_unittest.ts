@@ -175,4 +175,69 @@ describe('SkillManagerImpl', () => {
     expect(list.length).toBe(1);
     expect(list[0]!.source).toBe('first');
   });
+
+  test('lists namespaced sources as <namespace>/<name>', async () => {
+    const mgr = new SkillManagerImpl();
+    const src = makeSource('server', PERFETTO, PERFETTO_FILES);
+    mgr.addSource({
+      ...src,
+      loadIndex: async () => ({...PERFETTO, namespace: 'com.acme'}),
+    });
+    const list = await mgr.list();
+    expect(list.map((s) => s.name)).toEqual(['com.acme/perfetto']);
+    expect(await mgr.readFile('com.acme/perfetto', 'SKILL.md')).toBe(
+      '# Perfetto\n',
+    );
+    expect(src.fetches).toEqual(['perfetto/SKILL.md']);
+  });
+
+  test('only an embedder-managed source can replace a builtin skill', async () => {
+    const replacing: SkillIndex = {
+      skills: [{...PERFETTO.skills[0]!, replaces: 'perfetto'}],
+    };
+    const serverFiles = {'perfetto/SKILL.md': '# Server build\n'};
+
+    const user = new SkillManagerImpl();
+    user.addSource(makeSource('builtin', PERFETTO, PERFETTO_FILES));
+    user.addSource({
+      ...makeSource('user', replacing, serverFiles),
+      loadIndex: async () => ({...replacing, namespace: 'com.acme'}),
+    });
+    expect((await user.list()).map((s) => s.name)).toEqual([
+      'com.acme/perfetto',
+      'perfetto',
+    ]);
+
+    const embedder = new SkillManagerImpl();
+    embedder.addSource(makeSource('builtin', PERFETTO, PERFETTO_FILES));
+    embedder.addSource({
+      ...makeSource('embedder', replacing, serverFiles),
+      embedderManaged: true,
+      loadIndex: async () => ({...replacing, namespace: 'com.meta'}),
+    });
+    const list = await embedder.list();
+    expect(list.map((s) => [s.name, s.source])).toEqual([
+      ['perfetto', 'embedder'],
+    ]);
+    expect(await embedder.readFile('perfetto', 'SKILL.md')).toBe(
+      '# Server build\n',
+    );
+  });
+
+  test('falls back to the builtin skill when the replacing source fails', async () => {
+    const mgr = new SkillManagerImpl();
+    mgr.addSource(makeSource('builtin', PERFETTO, PERFETTO_FILES));
+    mgr.addSource({
+      id: 'embedder',
+      embedderManaged: true,
+      loadIndex: async () => {
+        throw new Error('403');
+      },
+      fetchFile: async () => '',
+    });
+    const list = await mgr.list();
+    expect(list.map((s) => [s.name, s.source])).toEqual([
+      ['perfetto', 'builtin'],
+    ]);
+  });
 });

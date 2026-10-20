@@ -16,10 +16,17 @@
 
 The UI agent (dev.perfetto.Intelletto) has no shell and no file system: it
 reads a skill through tools that fetch one file at a time. This script turns a
-skill directory (the same tree that coding agents load) into:
+skill directory (the same tree that coding agents load) into an index (one
+entry per skill: name, description, files) and the files that the UI can use:
 
-  <out>/index.json             one entry per skill: name, description, files
-  <out>/<skill>/<path>         the files that the UI can use
+  --layout assets (the UI build, see ui/build.mjs):
+    <out>/index.json
+    <out>/<skill>/<path>
+
+  --layout extension-server --module <id> (an extension server, see
+  docs/visualization/extension-server-protocol.md):
+    <out>/modules/<id>/skills
+    <out>/modules/<id>/skill_files/<skill>/<path>
 
 Content for only one target is marked in the markdown, each mark alone on its
 line. Unmarked content is for both targets.
@@ -285,7 +292,7 @@ class Skill:
         return f'{target}-only file'
     return None
 
-  def index_entry(self) -> dict:
+  def index_entry(self, replaces: Optional[str] = None) -> dict:
     paths = sorted(self.files, key=lambda p: (p != SKILL_FILE, p))
     files = []
     for p in paths:
@@ -293,18 +300,30 @@ class Skill:
       if size > MAX_FILE_BYTES:
         raise SkillError(f'{self.name}: {p} is {size} bytes, over the limit')
       files.append({'path': p, 'bytes': size})
-    return {
+    entry = {
         'name': self.name,
         'description': self.description,
         'files': files,
     }
+    if replaces is not None:
+      entry['replaces'] = replaces
+    return entry
 
 
-def write_skills(skills: List[Skill], index_path: Path, files_dir: Path):
+def write_skills(skills: List[Skill],
+                 index_path: Path,
+                 files_dir: Path,
+                 replaces: Optional[Set[str]] = None):
   names = [s.name for s in skills]
   if len(set(names)) != len(names):
     raise SkillError(f'duplicate skill names: {names}')
-  entries = [s.index_entry() for s in skills]
+  replaces = replaces or set()
+  unknown = replaces - set(names)
+  if unknown:
+    raise SkillError(f'--replaces names no input skill: {sorted(unknown)}')
+  entries = [
+      s.index_entry(s.name if s.name in replaces else None) for s in skills
+  ]
   for skill in skills:
     dst_root = files_dir / skill.name
     if dst_root.exists():
@@ -326,16 +345,36 @@ def main(argv: Optional[List[str]] = None) -> int:
       help='skill directory (repeatable)')
   parser.add_argument(
       '--layout',
-      choices=['assets'],
+      choices=['assets', 'extension-server'],
       default='assets',
-      help='assets: <out>/index.json and <out>/<skill>/<path> for the UI build')
+      help='assets: files for the UI build; extension-server: files for '
+      'modules/<id>/ of an extension server')
+  parser.add_argument(
+      '--module', help='extension-server layout: the module id to write')
+  parser.add_argument(
+      '--replaces',
+      action='append',
+      default=[],
+      help='extension-server layout: mark the skill of this name as the '
+      'replacement of the builtin skill of the same name (repeatable). The UI '
+      'honours it only from its embedder-managed server.')
   parser.add_argument('--out', required=True, help='output directory')
   args = parser.parse_args(argv)
 
   try:
     skills = [Skill(Path(s)) for s in args.skill]
     out = Path(args.out)
-    write_skills(skills, out / INDEX_FILE, out)
+    if args.layout == 'assets':
+      if args.module or args.replaces:
+        raise SkillError('--module and --replaces need --layout '
+                         'extension-server')
+      write_skills(skills, out / INDEX_FILE, out)
+    else:
+      if not args.module or not re.match(r'^[A-Za-z0-9_]+$', args.module):
+        raise SkillError('--layout extension-server needs a valid --module')
+      mod_dir = out / 'modules' / args.module
+      write_skills(skills, mod_dir / 'skills', mod_dir / 'skill_files',
+                   set(args.replaces))
   except SkillError as e:
     print(f'gen_ui_skills: error: {e}', file=sys.stderr)
     return 1

@@ -58,7 +58,7 @@ export default class ExtensionServersPlugin implements PerfettoPlugin {
       id: 'dev.perfetto.ExtensionServers',
       name: 'Extension Servers',
       description:
-        'Configure servers that provide additional macros, SQL modules, and proto descriptors.',
+        'Configure servers that provide additional macros, SQL modules, proto descriptors, and agent skills.',
       defaultValue: [],
       schema: extensionServersSchema,
       render: renderExtensionServersSettings,

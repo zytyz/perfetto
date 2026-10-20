@@ -177,6 +177,34 @@ class GenUiSkillsTest(unittest.TestCase):
                             str(self.src), '--out',
                             str(self.out)]), 1)
 
+  def test_extension_server_layout(self):
+    self.assertEqual(
+        gen_ui_skills.main([
+            '--skill',
+            str(self.src), '--layout', 'extension-server', '--module',
+            'default', '--replaces', 'demo', '--out',
+            str(self.out)
+        ]), 0)
+    mod = self.out / 'modules' / 'default'
+    (entry,) = json.loads((mod / 'skills').read_text())['skills']
+    self.assertEqual(entry['replaces'], 'demo')
+    self.assertTrue((mod / 'skill_files/demo/SKILL.md').is_file())
+    self.assertTrue((mod / 'skill_files/demo/workflows/both.md').is_file())
+
+  def test_extension_server_layout_checks_flags(self):
+    for extra in (['--module', 'bad/id'], ['--module', 'm', '--replaces',
+                                           'x'], []):
+      self.assertEqual(
+          gen_ui_skills.main(
+              ['--skill',
+               str(self.src), '--layout', 'extension-server'] + extra +
+              ['--out', str(self.out)]), 1)
+    self.assertEqual(
+        gen_ui_skills.main(
+            ['--skill',
+             str(self.src), '--module', 'm', '--out',
+             str(self.out)]), 1)
+
   def test_upstream_perfetto_skill_builds(self):
     self.assertEqual(
         gen_ui_skills.main([
