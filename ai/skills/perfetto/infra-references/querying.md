@@ -2,6 +2,8 @@
 
 How to get data out of a trace (`.pftrace`, `.perfetto-trace`, `.pb`,
 systrace, ftrace text, Chrome JSON) with `trace_processor` and PerfettoSQL.
+
+<!-- targets: cli -->
 `trace_processor` must be on the `PATH` (see `SKILL.md`, or
 `$SKILL_ROOT/environment-references/setup.md`).
 
@@ -30,6 +32,7 @@ trace_processor server kill mysession                     # when completely done
 - `trace_processor query TRACE_FILE "..."` without a session re-parses on
   every call. Use it only for a single quick question.
 
+<!-- /targets -->
 ## 2. Discover, don't guess
 
 ```sql

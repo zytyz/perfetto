@@ -65,6 +65,10 @@ jobs:
         shell: bash
         run: python3 tools/test_gen_amalgamated.py
 
+      - name: Test the UI skill generator
+        shell: bash
+        run: python3 tools/gen_ui_skills_unittest.py
+
       - name: Build docs
         shell: bash
         run: infra/perfetto.dev/build

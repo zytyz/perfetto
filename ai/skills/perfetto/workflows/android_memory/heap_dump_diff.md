@@ -1,3 +1,4 @@
+<!-- targets: cli -->
 # Diffing Android Java Heap Dumps
 
 Compares two Android Java heap dumps (before vs after), either Perfetto

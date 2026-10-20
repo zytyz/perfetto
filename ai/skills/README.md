@@ -80,7 +80,8 @@ ai/skills/perfetto/
 │   ├── trace_config_reference.md
 │   └── example-configs/
 ├── environment-references/
-│   └── setup.md                 $SKILL_ROOT and the bundled trace_processor
+│   ├── setup.md                 $SKILL_ROOT and the bundled trace_processor
+│   └── ui.md                    how to use the skill inside the Perfetto UI
 └── workflows/
     ├── android_memory/          heap dumps, native heap, allocations + scripts/
     └── gpu/                     occupancy, frequency, compute kernels + scripts/
@@ -104,6 +105,38 @@ to set `$SKILL_ROOT` once.
 - Add an eval case for any workflow, with ground truth computed by
   `trace_processor_shell`, and check the with/without numbers before
   sending the change.
+
+## In the Perfetto UI
+
+The UI assistant (`dev.perfetto.Intelletto`) uses the same skill. It has
+no shell: the trace is already loaded in the UI's trace_processor, and the
+agent reads the skill through tools (`load_skill`, `read_skill_file`,
+`run_skill_sql`), one file at a time. Only the skill's name and
+description are always in its prompt.
+
+`tools/gen_ui_skills.py` builds the UI form at UI build time
+(`ui/build.mjs`, into `ai_skills/` next to the other assets):
+
+- Content for one target only is wrapped in a mark, each mark alone on
+  its line. Unmarked content is for both targets.
+  - `<!-- targets: cli -->` ... `<!-- /targets -->`: needs the CLI
+    (sessions, Python, recording, two traces at once, report files). The
+    UI form drops it.
+  - `<!-- targets: ui -->` ... `<!-- /targets -->`: only for the UI. The
+    UI form keeps the content without the marks.
+  - A file that opens a mark before any content (other HTML comment
+    lines may come first) and never closes it belongs to that target as
+    a whole.
+  - Only the UI form reads the marks. Coding agents get every file as it
+    is, marks included, so keep UI-only text in files that no CLI link
+    reaches, such as `environment-references/ui.md`.
+- Starting from the router, only the `.md` and `.sql` files that the
+  remaining links and `$SKILL_ROOT/...` references reach are copied.
+  A kept link to a CLI-only or missing file fails the build.
+- `environment-references/ui.md` replaces the CLI setup for the UI.
+
+When you add a workflow, mark what the UI cannot do, and run
+`python3 tools/gen_ui_skills_unittest.py`.
 
 ## How it ships
 

@@ -1,3 +1,4 @@
+<!-- targets: cli -->
 # Getting `trace_processor` working
 
 Two things are set up once per session: `$SKILL_ROOT` and

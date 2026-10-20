@@ -15,6 +15,7 @@ description: >-
 Perfetto traces are analysed with `trace_processor`, a SQL engine over the
 trace. This skill ships that tool and tells you how to drive it.
 
+<!-- targets: cli -->
 ## Setup (once per session)
 
 Set `$SKILL_ROOT` to the absolute path of the directory containing this
@@ -34,20 +35,29 @@ On Windows invoke it as `python "$SKILL_ROOT/bin/trace_processor" ...`. If
 the environment already mandates its own `trace_processor` (Google
 internal, OEM or CI images), use that instead.
 
+<!-- /targets -->
 ## Pick the workflow
 
+<!-- targets: cli -->
 1. **Record a trace** (no trace file yet)
    - Android device: [recording_android_traces.md]($SKILL_ROOT/infra-references/recording_android_traces.md)
    - Linux host: [recording_linux_traces.md]($SKILL_ROOT/infra-references/recording_linux_traces.md)
 
+<!-- /targets -->
 2. **Memory** (heap dumps, leaks, churn)
    - Leak or retention in one Java heap dump: [heap_dump.md]($SKILL_ROOT/workflows/android_memory/heap_dump.md)
+   <!-- targets: cli -->
    - Compare two Java heap dumps (before/after diff): [heap_dump_diff.md]($SKILL_ROOT/workflows/android_memory/heap_dump_diff.md)
+   <!-- /targets -->
    - Duplicate objects, caching opportunities: [heap_dump_caching_optimizer.md]($SKILL_ROOT/workflows/android_memory/heap_dump_caching_optimizer.md)
+   <!-- targets: cli -->
    - Many heap dumps, find common leak patterns: [heap_dump_cluster.md]($SKILL_ROOT/workflows/android_memory/heap_dump_cluster.md)
+   <!-- /targets -->
    - Native (C/C++) heap profile: [native_heap.md]($SKILL_ROOT/workflows/android_memory/native_heap.md)
    - Java allocation churn / GC pressure: [java_allocation_profile.md]($SKILL_ROOT/workflows/android_memory/java_allocation_profile.md)
+   <!-- targets: cli -->
    - Compare two native or Java heap profiles (before/after diff): [heap_profile_diff.md]($SKILL_ROOT/workflows/android_memory/heap_profile_diff.md)
+   <!-- /targets -->
 
 3. **GPU / accelerator** (GPU-bound or host-bound?)
    - Which GPUs are in the trace: [gpu_info.md]($SKILL_ROOT/workflows/gpu/gpu_info.md)
@@ -66,6 +76,7 @@ ad-hoc work.
 Answer with numbers from the trace and the query that produced them, and
 keep model-generated theories clearly separate from measured facts.
 
+<!-- targets: cli -->
 For any investigation that took more than a handful of queries, or that
 followed a workflow, also save a markdown report in the working directory
 (default `perfetto_analysis_report.md`, or where the user asked) so a
@@ -75,3 +86,4 @@ concrete numbers, the validated queries so the analysis can be re-run,
 and open questions or next steps. Mention its path in your final message.
 A single quick question answered by one or two queries does not need a
 file.
+<!-- /targets -->
